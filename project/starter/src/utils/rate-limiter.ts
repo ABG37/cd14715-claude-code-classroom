@@ -64,7 +64,13 @@ export class RateLimiter {
     // 3. Increment activeRequests
     // 4. Add a record to requestHistory with current timestamp and estimatedTokens
 
-    throw new Error('Not implemented');
+    await this.waitForSlot();
+    await this.waitForRateLimit(estimatedTokens);
+    this.activeRequests++;
+    this.requestHistory.push({
+      timestamp: Date.now(),
+      tokens: estimatedTokens,
+    });
   }
 
   /**
@@ -77,7 +83,9 @@ export class RateLimiter {
     // Update last request with actual token count if provided
     if (actualTokens !== undefined && this.requestHistory.length > 0) {
       const lastRequest = this.requestHistory[this.requestHistory.length - 1];
-      lastRequest.tokens = actualTokens;
+      if (lastRequest) {
+        lastRequest.tokens = actualTokens;
+      }
     }
 
     // Wake up next waiting request
@@ -127,7 +135,19 @@ export class RateLimiter {
     //    - requestsInWindow < maxRequestsPerMinute
     //    - tokensInWindow + estimatedTokens <= maxTokensPerMinute
 
-    throw new Error('Not implemented');
+    this.pruneOldRecords();
+    if (this.activeRequests >= this.config.maxConcurrent) {
+      return false;
+    }
+    const requestsInWindow = this.requestHistory.length;
+    if (requestsInWindow >= this.config.maxRequestsPerMinute) {
+      return false;
+    }
+    const tokensInWindow = this.requestHistory.reduce((sum, item) => sum + item.tokens, 0);
+    if (tokensInWindow + estimatedTokens > this.config.maxTokensPerMinute) {
+     return false;
+    }
+     return true;
   }
 
   /**
@@ -141,7 +161,12 @@ export class RateLimiter {
     // Hint: Create a new Promise and add its resolve function to waitQueue
     // The resolve function will be called by release()
 
-    throw new Error('Not implemented');
+    if (this.activeRequests < this.config.maxConcurrent) {
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.waitQueue.push(resolve);
+    });
   }
 
   /**
@@ -168,7 +193,16 @@ export class RateLimiter {
     // 5. Sleep for the calculated wait time
     // 6. Loop continues and checks again
 
-    throw new Error('Not implemented');
+    while (!this.canProceed(estimatedTokens)) {
+      this.pruneOldRecords();
+      if (this.requestHistory.length === 0) {
+        break;
+      }
+      const oldestRecord = this.requestHistory[0];
+      const oldestTimestamp = oldestRecord ? oldestRecord.timestamp : Date.now();
+      const waitTime = Math.max(100, Math.min(oldestTimestamp + 60000 - Date.now(), 5000));
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
   }
 
   /**
@@ -184,7 +218,10 @@ export class RateLimiter {
     // 2. Filter requestHistory to keep only records where timestamp > cutoff
     // Hint: Use Array.filter()
 
-    throw new Error('Not implemented');
+    const cutoffTimestamp = Date.now() - 60000;
+    this.requestHistory = this.requestHistory.filter(
+      (record) => record.timestamp > cutoffTimestamp
+    );
   }
 }
 

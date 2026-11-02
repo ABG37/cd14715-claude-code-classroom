@@ -63,20 +63,28 @@ export type ErrorCode = typeof ErrorCodes[keyof typeof ErrorCodes];
  * @throws ReviewError with RETRY_EXHAUSTED code if all retries fail
  */
 export async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries: number = 3,
-  delayMs: number = 1000
+ fn: () => Promise<T>,
+ maxRetries = 3,
+ delayMs = 1000
 ): Promise<T> {
-  // TODO: Implement retry logic with exponential backoff
-  // Hints:
-  // - Use a for loop from 1 to maxRetries
-  // - Use try/catch to catch errors
-  // - Calculate backoff: delayMs * Math.pow(2, attempt - 1)
-  // - Add jitter: Math.random() * 100
-  // - Use setTimeout wrapped in Promise for delay
-  // - Throw ReviewError with ErrorCodes.RETRY_EXHAUSTED if all retries fail
-
-  throw new Error('Not implemented');
+ let attempt = 0;
+ while (attempt < maxRetries) {
+   try {
+     return await fn();
+   } catch (error) {
+     attempt++;
+     if (attempt >= maxRetries) {
+       throw new ReviewError(
+         `Retry failed after ${maxRetries} attempts: ${(error as Error).message}`,
+         ErrorCodes.RETRY_EXHAUSTED
+       );
+     }
+     const backoff = delayMs * Math.pow(2, attempt - 1);
+     const jitter = Math.random() * 100;
+     await new Promise((resolve) => setTimeout(resolve, backoff + jitter));
+   }
+ }
+ throw new ReviewError('All retries failed', ErrorCodes.RETRY_EXHAUSTED);
 }
 
 /**
@@ -92,18 +100,19 @@ export async function withRetry<T>(
  * @throws ReviewError with AGENT_TIMEOUT code if timeout is reached
  */
 export async function withTimeout<T>(
-  fn: () => Promise<T>,
-  timeoutMs: number,
-  errorMessage: string = 'Operation timed out'
+ fn: () => Promise<T>,
+ timeoutMs: number,
+ errorMessage = 'Operation timed out'
 ): Promise<T> {
-  // TODO: Implement timeout wrapper using Promise.race
-  // Hints:
-  // - Use Promise.race to race fn() against a timeout promise
-  // - The timeout promise should reject after timeoutMs milliseconds
-  // - Throw ReviewError with ErrorCodes.AGENT_TIMEOUT on timeout
-  // - Include timeoutMs in metadata
-
-  throw new Error('Not implemented');
+ let timer: NodeJS.Timeout;
+ const timeoutPromise = new Promise<never>((_, reject) => {
+   timer = setTimeout(() => {
+     reject(new ReviewError(errorMessage, ErrorCodes.AGENT_TIMEOUT));
+   }, timeoutMs);
+ });
+ return Promise.race([fn(), timeoutPromise]).finally(() => {
+   clearTimeout(timer);
+ });
 }
 
 /**
